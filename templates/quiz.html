@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Quiz BISINDO</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    #webcam {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 8px;
+      transform: scaleX(-1);
+    }
+    .quiz-container {
+        margin: auto;
+        max-width: 500px;
+        padding: 1rem;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    .question-label {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #6b21a8;
+    }
+    .progress-wrapper {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+        font-weight: bold;
+        color: #999;
+    }
+    #resultPopup {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.6);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        visibility: hidden;
+    }
+    #popupContent {
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        text-align: center;
+    }
+    #popupContent button {
+        margin-top: 1rem;
+        padding: 0.5rem 1rem;
+        background: #7c3aed;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div class="quiz-container">
+  <button class="back-btn" onclick="window.location.href='/'" title="Kembali">×</button>
+  <h1>Quiz BISINDO</h1>
+  <div class="progress-wrapper">
+    <div id="timeLeft">⏱️ 10s</div>
+    <div id="quizProgress">Soal 0/10</div>
+  </div>
+  <div class="question-label" id="quizLabel">-</div>
+
+  <table style="width:100%; border-spacing: 15px 10px;">
+    <tr>
+        <td style="text-align: center;">
+            <div style="margin-top:15px">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="hiddenCanvas" style="display:none;"></canvas>
+            </div>
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <div id="predictionChar" class="prediction-char">-</div>
+        </td>
+    </tr>
+  </table>
+</div>
+
+<p id="hint" style="font-size:0.9rem; color:#aaa; margin-top:20px;">
+  Kamera aktif. Sistem akan membaca gesture secara otomatis.
+</p>
+
+<div id="resultPopup" style="visibility: hidden;">
+  <div id="popupContent">
+    <h2>Skor Anda</h2>
+    <p id="finalScore">0/10</p>
+    <button onclick="location.reload()">Tutup</button>
+  </div>
+</div>
+
+<script>
+  const webcam = document.getElementById('webcam');
+  const canvas = document.getElementById('hiddenCanvas');
+  const ctx = canvas.getContext('2d');
+  const predictionChar = document.getElementById("predictionChar");
+  const quizLabel = document.getElementById("quizLabel");
+  const quizProgress = document.getElementById("quizProgress");
+  const resultPopup = document.getElementById("resultPopup");
+  const finalScore = document.getElementById("finalScore");
+  const timeLeft = document.getElementById("timeLeft");
+
+  let timeoutId = null;
+  let countdownInterval = null;
+  let predictionLocked = true;
+  let quizStarted = false;
+
+  navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+    webcam.srcObject = stream;
+    setTimeout(startQuiz, 3000);
+    setInterval(sendImageToServer, 500);
+  });
+
+  function startQuiz() {
+    quizStarted = true;
+    getNextSoal();
+  }
+
+  function loadQuestion(label, index) {
+    quizLabel.textContent = label;
+    quizProgress.textContent = `Soal ${index}/10`;
+    predictionChar.textContent = "-";
+    predictionLocked = false;
+
+    let seconds = 10;
+    timeLeft.textContent = `⏱️ ${seconds}s`;
+    countdownInterval = setInterval(() => {
+      seconds--;
+      timeLeft.textContent = `⏱️ ${seconds}s`;
+      if (seconds <= 0) clearInterval(countdownInterval);
+    }, 1000);
+
+    timeoutId = setTimeout(() => {
+      if (!predictionLocked) {
+        submitAnswer("");
+      }
+    }, 10000);
+  }
+
+  function submitAnswer(answer) {
+    predictionLocked = true;
+    clearTimeout(timeoutId);
+    clearInterval(countdownInterval);
+
+    fetch("{{ url_for('quiz_next') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prediction: answer })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.done) {
+        resultPopup.style.visibility = 'visible';
+        finalScore.textContent = `${data.score}/10`;
+        quizLabel.textContent = "-";
+        quizProgress.textContent = "Selesai";
+        predictionChar.textContent = "-";
+        return;
+      }
+      loadQuestion(data.label, data.index);
+    });
+  }
+
+  function sendImageToServer() {
+    if (predictionLocked || !quizStarted) return;
+    canvas.width = webcam.videoWidth;
+    canvas.height = webcam.videoHeight;
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(webcam, 0, 0);
+    ctx.restore();
+    const base64Image = canvas.toDataURL('image/jpeg');
+
+    fetch('/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image })
+    })
+    .then(res => res.json())
+    .then(data => {
+      const pred = data.prediction;
+      predictionChar.textContent = pred;
+      if (pred === quizLabel.textContent) {
+        submitAnswer(pred);
+      }
+    });
+  }
+
+  async function getNextSoal() {
+    const res = await fetch("{{ url_for('quiz_next') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prediction: null })
+    });
+    const data = await res.json();
+
+    if (data.done) {
+      finalScore.textContent = `${data.score}/10`;
+      resultPopup.style.visibility = 'visible';
+      return;
+    }
+    loadQuestion(data.label, data.index);
+  }
+</script>
+</body>
+</html>

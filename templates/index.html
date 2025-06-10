@@ -1,0 +1,122 @@
+<!-- Updated index.html with base64 camera support and countdown indicator -->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Gesture Link - BISINDO Detector</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    #webcam {
+      width: 100%;
+      max-width: 360px;
+      border-radius: 15px;
+      transform: scaleX(-1);
+    }
+    #countdownDisplay {
+      font-size: 1.2rem;
+      color: #6b21a8;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <button class="back-btn" onclick="window.location.href='/'" title="Kembali ke Landing Page">×</button>
+
+  <h1>Gesture Link</h1>
+  <p>Deteksi Gerakan Bahasa Isyarat BISINDO (Alfabet & Angka)</p>
+
+  <table style="width:100%; border-spacing: 15px 10px;">
+    <tr>
+        <td style="text-align: center;">
+            <div style="margin-top:15px">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="hiddenCanvas" style="display:none;"></canvas>
+            </div>
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <div id="countdownDisplay">⌛ Mulai dalam 3 detik...</div>
+            <div id="predictionText" class="prediction-text">-</div>
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <button id="clearBtn" class="clear-btn">Clear Text</button>
+        </td>
+    </tr>
+  </table>
+  
+</div>
+
+<script>
+  const webcam = document.getElementById('webcam');
+  const canvas = document.getElementById('hiddenCanvas');
+  const ctx = canvas.getContext('2d');
+  const predictionText = document.getElementById('predictionText');
+  const clearBtn = document.getElementById('clearBtn');
+  const countdownDisplay = document.getElementById('countdownDisplay');
+
+  let sentence = "";
+  let countdownSeconds = 3;
+
+  navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+    webcam.srcObject = stream;
+    startCountdown();
+  });
+
+  function startCountdown() {
+    countdownDisplay.textContent = `⌛ Mulai dalam ${countdownSeconds} detik...`;
+    const interval = setInterval(() => {
+      countdownSeconds--;
+      if (countdownSeconds <= 0) {
+        clearInterval(interval);
+        countdownDisplay.textContent = "⏱️ Mendeteksi...";
+        sendImageToServer();
+        setInterval(() => {
+          countdownSeconds = 3;
+          startCountdown();
+        }, 3000);
+      } else {
+        countdownDisplay.textContent = `⌛ Mulai dalam ${countdownSeconds} detik...`;
+      }
+    }, 1000);
+  }
+
+  clearBtn.addEventListener('click', async () => {
+    const res = await fetch('{{ url_for("clear_text") }}', { method: 'POST' });
+    if (res.ok) {
+      sentence = "";
+      predictionText.textContent = "-";
+    }
+  });
+
+  function sendImageToServer() {
+    canvas.width = webcam.videoWidth;
+    canvas.height = webcam.videoHeight;
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(webcam, 0, 0);
+    ctx.restore();
+
+    const base64Image = canvas.toDataURL('image/jpeg');
+
+    fetch('/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image })
+    })
+    .then(res => res.json())
+    .then(data => {
+      const pred = data.prediction;
+      if (pred && pred !== "-" && (!sentence || sentence[sentence.length - 1] !== pred)) {
+        sentence += pred;
+        predictionText.textContent = sentence;
+      }
+    });
+  }
+</script>
+</body>
+</html>

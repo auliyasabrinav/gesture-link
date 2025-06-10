@@ -1,0 +1,4 @@
+# .gitignore
+
+# Hindari dataset
+dataset/

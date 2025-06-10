@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Belajar huruf/angka {{ label }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    #webcam {
+      width: 100%;
+      max-width: 360px;
+      border-radius: 15px;
+      transform: scaleX(-1);
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <button class="back-btn" onclick="window.location.href='/learn'" title="Kembali">×</button>
+
+  <h1 style="color: #7c3aed;">Belajar huruf/angka {{ label }}</h1>
+  <p style="color: #6b21a8;">Deteksi Gerakan Bahasa Isyarat BISINDO<br>(Alfabet & Angka)</p>
+  <p style="font-size:0.9rem; color:#aaa;">Lakukan gerakan tangan sesuai contoh di bawah. Sistem akan memberi tahu jika benar.</p>
+
+  <table style="width:100%; border-spacing: 15px 10px;">
+    <tr>
+        <td style="text-align: center;">
+            <div class="sign-example">
+                <img src="{{ url_for('static', filename='img_signs/' + label + '.jpg') }}" alt="Contoh {{ label }}">
+            </div>
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <div style="margin-top:15px">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="hiddenCanvas" style="display:none;"></canvas>
+            </div>    
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <div id="predictionChar" class="prediction-char">-</div>
+        </td>
+    </tr>
+    <tr>
+        <td style="text-align: center;">
+            <button id="resetBtn" class="reset-btn hidden">Ulangi</button>
+        </td>
+    </tr>
+  </table>
+
+</div>
+
+<script>
+  const label = '{{ label }}'.toUpperCase();
+  const webcam = document.getElementById('webcam');
+  const canvas = document.getElementById('hiddenCanvas');
+  const ctx = canvas.getContext('2d');
+  const predictionChar = document.getElementById('predictionChar');
+  const resetBtn = document.getElementById('resetBtn');
+
+  let correctShown = false;
+  let lastCorrectTime = null;
+  let confirmed = false;
+
+  navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+    webcam.srcObject = stream;
+    setInterval(sendImageToServer, 500);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    predictionChar.textContent = "-";
+    predictionChar.style.backgroundColor = '#f3f3f3';
+    predictionChar.style.color = '#000';
+    resetBtn.classList.add('hidden');
+    lastCorrectTime = null;
+    correctShown = false;
+    confirmed = false;
+  });
+
+  function sendImageToServer() {
+    if (confirmed) return;
+    canvas.width = webcam.videoWidth;
+    canvas.height = webcam.videoHeight;
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(webcam, 0, 0);
+    ctx.restore();
+    const base64Image = canvas.toDataURL('image/jpeg');
+
+    fetch('/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64Image })
+    })
+    .then(res => res.json())
+    .then(async data => {
+      const pred = (data.prediction || "-").toUpperCase();
+      if (pred === label) {
+        if (!lastCorrectTime) {
+          lastCorrectTime = Date.now();
+          predictionChar.textContent = '⏳';
+          predictionChar.style.backgroundColor = '#fef9c3';
+          predictionChar.style.color = '#92400e';
+        } else if (Date.now() - lastCorrectTime >= 2000 && !correctShown) {
+          predictionChar.textContent = "BENAR";
+          predictionChar.style.backgroundColor = "#bbf7d0";
+          predictionChar.style.color = "#065f46";
+          correctShown = true;
+          confirmed = true;
+          resetBtn.classList.remove("hidden");
+          await fetch(`/mark_complete/${label}`, { method: 'POST' });
+        }
+      } else {
+        predictionChar.textContent = pred || "-";
+        predictionChar.style.backgroundColor = "#f3f3f3";
+        predictionChar.style.color = "#000";
+        lastCorrectTime = null;
+        correctShown = false;
+      }
+    });
+  }
+</script>
+</body>
+</html>
