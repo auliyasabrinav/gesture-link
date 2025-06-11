@@ -1,0 +1,5 @@
+model/
+dataset/
+*.h5
+*.npy
+*.mp4
